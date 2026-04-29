@@ -1,0 +1,30 @@
+# Python
+backend/.venv/
+backend/__pycache__/
+backend/**/__pycache__/
+backend/**/*.pyc
+backend/**/*.pyo
+backend/generated/
+
+# Environment secrets - NEVER commit these
+backend/.env
+.env
+
+# Node
+frontend/node_modules/
+frontend/dist/
+node_modules/
+
+# OS
+.DS_Store
+Thumbs.db
+
+# IDE
+.vscode/settings.json
+.idea/
+
+# Assets (large binaries - store in cloud storage)
+assets/audio/*.mp3
+assets/audio/*.wav
+assets/fonts/*.ttf
+assets/fonts/*.otf
