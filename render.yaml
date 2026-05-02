@@ -3,7 +3,7 @@ services:
     name: smartfeed-backend
     runtime: python
     rootDir: backend          # deploy only the backend subfolder
-    buildCommand: apt-get install -y ffmpeg && pip install -r requirements.txt
+    buildCommand: sudo apt-get install -y ffmpeg && pip install -r requirements.txt
     startCommand: uvicorn app.main:app --host 0.0.0.0 --port $PORT --workers 1
     plan: free                # free tier is fine — n8n calls it on demand
     region: singapore         # closest to India
