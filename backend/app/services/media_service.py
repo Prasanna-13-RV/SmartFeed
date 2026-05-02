@@ -401,6 +401,14 @@ def generate_youtube_short(post: dict, template: int = 1, audio_path: Optional[s
             import subprocess, shutil, random as _rnd
             ffmpeg_bin = settings.ffmpeg_binary
             _ffmpeg_found = shutil.which(ffmpeg_bin) or (Path(ffmpeg_bin).is_file() and str(Path(ffmpeg_bin)))
+            if not _ffmpeg_found:
+                try:
+                    import imageio_ffmpeg as _ioff  # type: ignore
+                    ffmpeg_bin = _ioff.get_ffmpeg_exe()
+                    _ffmpeg_found = ffmpeg_bin
+                    print(f"[media] Using imageio-ffmpeg bundled binary: {ffmpeg_bin}")
+                except Exception:
+                    pass
             if _ffmpeg_found:
                 # Probe audio duration so we pick a valid random start point
                 probe = subprocess.run(
