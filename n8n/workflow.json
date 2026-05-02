@@ -4,10 +4,413 @@
     {
       "parameters": {
         "rule": {
+          "interval": [{ "field": "hours", "hoursInterval": 6 }]
+        }
+      },
+      "id": "CronTrigger",
+      "name": "Every 6 Hours",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.2,
+      "position": [100, 300]
+    },
+    {
+      "parameters": {
+        "url": "http://localhost:8000/ping",
+        "method": "GET",
+        "options": { "timeout": 5000 }
+      },
+      "id": "PingCheck",
+      "name": "Ping — Is API up?",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [320, 300]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "boolean": [{ "value1": "={{ $json.pong }}", "value2": true }]
+        }
+      },
+      "id": "CheckPong",
+      "name": "API alive?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 1,
+      "position": [540, 300]
+    },
+    {
+      "parameters": {
+        "chatId": "={{ $vars.TELEGRAM_CHAT_ID }}",
+        "text": "⚠️ SmartFeed backend is DOWN — ping failed. Skipping run.",
+        "additionalFields": {}
+      },
+      "id": "AlertDown",
+      "name": "Alert: API Down",
+      "type": "n8n-nodes-base.telegram",
+      "typeVersion": 1.2,
+      "position": [760, 480],
+      "credentials": {
+        "telegramApi": { "id": "replace-with-your-credential-id", "name": "Telegram Account" }
+      }
+    },
+    {
+      "parameters": {
+        "url": "http://localhost:8000/generate-latest/",
+        "method": "POST",
+        "sendBody": true,
+        "contentType": "json",
+        "body": "{\n  \"platform\": \"instagram\"\n}",
+        "options": { "timeout": 90000 }
+      },
+      "id": "GenerateInstagram",
+      "name": "Generate Instagram Photo",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [760, 160]
+    },
+    {
+      "parameters": {
+        "url": "http://localhost:8000/generate-latest/",
+        "method": "POST",
+        "sendBody": true,
+        "contentType": "json",
+        "body": "{\n  \"platform\": \"youtube\"\n}",
+        "options": { "timeout": 180000 }
+      },
+      "id": "GenerateYoutube",
+      "name": "Generate YouTube Short",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [760, 360]
+    },
+    {
+      "parameters": {
+        "chatId": "={{ $vars.TELEGRAM_CHAT_ID }}",
+        "text": "=📸 Instagram Posted!\n\n📰 {{ $json.item.title }}\n🏷 #{{ $json.item.category }}\n🔗 {{ $json.item.published_link }}\n🕒 {{ $now.toISO() }}",
+        "additionalFields": {}
+      },
+      "id": "NotifyInstagram",
+      "name": "Notify: Instagram Done",
+      "type": "n8n-nodes-base.telegram",
+      "typeVersion": 1.2,
+      "position": [1000, 160],
+      "credentials": {
+        "telegramApi": { "id": "replace-with-your-credential-id", "name": "Telegram Account" }
+      }
+    },
+    {
+      "parameters": {
+        "chatId": "={{ $vars.TELEGRAM_CHAT_ID }}",
+        "text": "=🎬 YouTube Short Posted!\n\n📰 {{ $json.item.title }}\n🏷 #{{ $json.item.category }}\n🔗 {{ $json.item.published_link }}\n🕒 {{ $now.toISO() }}",
+        "additionalFields": {}
+      },
+      "id": "NotifyYoutube",
+      "name": "Notify: YouTube Done",
+      "type": "n8n-nodes-base.telegram",
+      "typeVersion": 1.2,
+      "position": [1000, 360],
+      "credentials": {
+        "telegramApi": { "id": "replace-with-your-credential-id", "name": "Telegram Account" }
+      }
+    },
+    {
+      "parameters": {
+        "chatId": "={{ $vars.TELEGRAM_CHAT_ID }}",
+        "text": "=❌ SmartFeed FAILED\n\nPlatform: {{ $json.platform }}\nError: {{ $json.detail || $json.message || 'Unknown error' }}\n🕒 {{ $now.toISO() }}",
+        "additionalFields": {}
+      },
+      "id": "NotifyError",
+      "name": "Notify: Error",
+      "type": "n8n-nodes-base.telegram",
+      "typeVersion": 1.2,
+      "position": [1000, 540],
+      "credentials": {
+        "telegramApi": { "id": "replace-with-your-credential-id", "name": "Telegram Account" }
+      }
+    }
+  ],
+  "connections": {
+    "Every 6 Hours": {
+      "main": [[{ "node": "Ping — Is API up?", "type": "main", "index": 0 }]]
+    },
+    "Ping — Is API up?": {
+      "main": [[{ "node": "API alive?", "type": "main", "index": 0 }]]
+    },
+    "API alive?": {
+      "main": [
+        [
+          { "node": "Generate Instagram Photo", "type": "main", "index": 0 },
+          { "node": "Generate YouTube Short",   "type": "main", "index": 0 }
+        ],
+        [{ "node": "Alert: API Down", "type": "main", "index": 0 }]
+      ]
+    },
+    "Generate Instagram Photo": {
+      "main": [[{ "node": "Notify: Instagram Done", "type": "main", "index": 0 }]]
+    },
+    "Generate YouTube Short": {
+      "main": [[{ "node": "Notify: YouTube Done", "type": "main", "index": 0 }]]
+    }
+  },
+  "active": false,
+  "settings": { "executionOrder": "v1" }
+}
+  "nodes": [
+    {
+      "parameters": {
+        "rule": {
           "interval": [
             {
-              "field": "minutes",
-              "minutesInterval": 30
+              "field": "hours",
+              "hoursInterval": 6
+            }
+          ]
+        }
+      },
+      "id": "CronTrigger",
+      "name": "Every 6 Hours",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.2,
+      "position": [100, 300]
+    },
+    {
+      "parameters": {
+        "url": "http://localhost:8000/ping",
+        "method": "GET",
+        "options": { "timeout": 5000 }
+      },
+      "id": "PingCheck",
+      "name": "Ping — Is API up?",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [320, 300]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "boolean": [
+            { "value1": "={{ $json.pong }}", "value2": true }
+          ]
+        }
+      },
+      "id": "CheckPong",
+      "name": "API alive?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 1,
+      "position": [540, 300]
+    },
+    {
+      "parameters": {
+        "chatId": "={{ $vars.TELEGRAM_CHAT_ID }}",
+        "text": "⚠️ SmartFeed backend is DOWN — ping failed. Skipping run.",
+        "additionalFields": {}
+      },
+      "id": "AlertDown",
+      "name": "Alert: API Down",
+      "type": "n8n-nodes-base.telegram",
+      "typeVersion": 1.2,
+      "position": [760, 480],
+      "credentials": {
+        "telegramApi": {
+          "id": "replace-with-your-credential-id",
+          "name": "Telegram Account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "url": "http://localhost:8000/health",
+        "method": "GET",
+        "options": {}
+      },
+      "id": "HealthCheck",
+      "name": "Health — Store Stats",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [760, 300]
+    },
+    {
+      "parameters": {
+        "url": "http://localhost:8000/process-rss",
+        "method": "POST",
+        "options": { "timeout": 30000 }
+      },
+      "id": "ProcessRSS",
+      "name": "Fetch & Index RSS",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [980, 300]
+    },
+    {
+      "parameters": {
+        "url": "http://localhost:8000/headlines/random",
+        "method": "GET",
+        "sendQuery": true,
+        "queryParameters": {
+          "parameters": [{ "name": "limit", "value": "3" }]
+        },
+        "options": {}
+      },
+      "id": "GetHeadlines",
+      "name": "Pick 3 Random Headlines",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [1200, 300]
+    },
+    {
+      "parameters": {
+        "fieldToSplitOut": "items",
+        "options": {}
+      },
+      "id": "SplitHeadlines",
+      "name": "Split Headlines",
+      "type": "n8n-nodes-base.splitOut",
+      "typeVersion": 1,
+      "position": [1420, 300]
+    },
+    {
+      "parameters": {
+        "url": "http://localhost:8000/generate/",
+        "method": "POST",
+        "sendBody": true,
+        "contentType": "json",
+        "body": "={\n  \"rss_id\": \"{{ $json.rss_id }}\",\n  \"platform\": \"instagram\",\n  \"template\": 1\n}",
+        "options": { "timeout": 60000 }
+      },
+      "id": "GenerateInstagram",
+      "name": "Generate Instagram Post",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [1640, 180]
+    },
+    {
+      "parameters": {
+        "url": "http://localhost:8000/generate/",
+        "method": "POST",
+        "sendBody": true,
+        "contentType": "json",
+        "body": "={\n  \"rss_id\": \"{{ $json.rss_id }}\",\n  \"platform\": \"youtube\",\n  \"template\": 1\n}",
+        "options": { "timeout": 120000 }
+      },
+      "id": "GenerateYoutube",
+      "name": "Generate YouTube Short",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [1640, 420]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "string": [
+            {
+              "value1": "={{ $json.item.post_status }}",
+              "operation": "equals",
+              "value2": "uploaded"
+            }
+          ]
+        }
+      },
+      "id": "CheckSuccess",
+      "name": "Generated OK?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 1,
+      "position": [1860, 180]
+    },
+    {
+      "parameters": {
+        "url": "http://localhost:8000/retry/",
+        "method": "POST",
+        "sendBody": true,
+        "contentType": "json",
+        "body": "={\n  \"rss_id\": \"{{ $json.item.rss_id }}\"\n}",
+        "options": { "timeout": 60000 }
+      },
+      "id": "RetryFailed",
+      "name": "Retry Failed Post",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [2080, 380]
+    },
+    {
+      "parameters": {
+        "chatId": "={{ $vars.TELEGRAM_CHAT_ID }}",
+        "text": "=✅ SmartFeed Posted!\n\n📰 {{ $json.item.title }}\n📱 Platform: {{ $json.item.assigned_platform }}\n🎨 Template: {{ $json.item.template }}\n🔗 {{ $json.item.published_link }}\n🕒 {{ $now.toISO() }}",
+        "additionalFields": {}
+      },
+      "id": "NotifySuccess",
+      "name": "Notify: Success",
+      "type": "n8n-nodes-base.telegram",
+      "typeVersion": 1.2,
+      "position": [2080, 60],
+      "credentials": {
+        "telegramApi": {
+          "id": "replace-with-your-credential-id",
+          "name": "Telegram Account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "chatId": "={{ $vars.TELEGRAM_CHAT_ID }}",
+        "text": "=❌ SmartFeed FAILED after retry\n\nTitle: {{ $json.item.title }}\nError: {{ $json.item.error_message }}\nRSS ID: {{ $json.item.rss_id }}",
+        "additionalFields": {}
+      },
+      "id": "NotifyFailure",
+      "name": "Notify: Failure",
+      "type": "n8n-nodes-base.telegram",
+      "typeVersion": 1.2,
+      "position": [2300, 380],
+      "credentials": {
+        "telegramApi": {
+          "id": "replace-with-your-credential-id",
+          "name": "Telegram Account"
+        }
+      }
+    }
+  ],
+  "connections": {
+    "Every 6 Hours": {
+      "main": [[{ "node": "Ping — Is API up?", "type": "main", "index": 0 }]]
+    },
+    "Ping — Is API up?": {
+      "main": [[{ "node": "API alive?", "type": "main", "index": 0 }]]
+    },
+    "API alive?": {
+      "main": [
+        [{ "node": "Health — Store Stats", "type": "main", "index": 0 }],
+        [{ "node": "Alert: API Down",       "type": "main", "index": 0 }]
+      ]
+    },
+    "Health — Store Stats": {
+      "main": [[{ "node": "Fetch & Index RSS", "type": "main", "index": 0 }]]
+    },
+    "Fetch & Index RSS": {
+      "main": [[{ "node": "Pick 3 Random Headlines", "type": "main", "index": 0 }]]
+    },
+    "Pick 3 Random Headlines": {
+      "main": [[{ "node": "Split Headlines", "type": "main", "index": 0 }]]
+    },
+    "Split Headlines": {
+      "main": [[
+        { "node": "Generate Instagram Post", "type": "main", "index": 0 },
+        { "node": "Generate YouTube Short",  "type": "main", "index": 0 }
+      ]]
+    },
+    "Generate Instagram Post": {
+      "main": [[{ "node": "Generated OK?", "type": "main", "index": 0 }]]
+    },
+    "Generated OK?": {
+      "main": [
+        [{ "node": "Notify: Success",    "type": "main", "index": 0 }],
+        [{ "node": "Retry Failed Post",  "type": "main", "index": 0 }]
+      ]
+    },
+    "Retry Failed Post": {
+      "main": [[{ "node": "Notify: Failure", "type": "main", "index": 0 }]]
+    }
+  },
+  "active": false,
+  "settings": { "executionOrder": "v1" }
+}
             }
           ]
         }

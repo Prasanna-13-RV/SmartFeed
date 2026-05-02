@@ -4,7 +4,7 @@
   "scripts": {
     "start": "npm run start:frontend",
     "start:frontend": "npm --prefix frontend run dev",
-    "start:backend": "bash -c 'cd backend && .venv/Scripts/python.exe start.py'",
+    "start:backend": "backend\\.venv\\Scripts\\python.exe backend\\start.py",
     "start:mongo": "docker compose up -d mongo"
   }
 }

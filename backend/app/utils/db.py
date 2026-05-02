@@ -1,26 +1,22 @@
-from pymongo import MongoClient, ASCENDING
-from pymongo.errors import PyMongoError
-from app.config import settings
+from __future__ import annotations
+
+from typing import Dict, Any
+
+# Pure in-memory store — no file persistence needed.
+# Each /generate-latest/ call fetches live RSS so old data is irrelevant.
+_store: Dict[str, Dict[str, Any]] = {}
 
 
-client = MongoClient(
-    settings.mongo_uri,
-    serverSelectionTimeoutMS=5000,   # fail fast so startup is quick
-    connectTimeoutMS=5000,
-    socketTimeoutMS=10000,
-    tls=True,
-)
-db = client[settings.mongo_db_name]
-posts_collection = db["news_posts"]
+def save_store() -> None:
+    """No-op — store is intentionally ephemeral."""
+    pass
 
 
-def init_db_indexes() -> None:
-    posts_collection.create_index([("rss_id", ASCENDING)], unique=True)
+def get_store() -> Dict[str, Dict[str, Any]]:
+    return _store
 
 
-def is_mongo_reachable() -> bool:
-    try:
-        client.admin.command("ping")
-        return True
-    except PyMongoError:
-        return False
+def start_mongo_retry_thread() -> None:
+    print("[db] Using pure in-memory store (ephemeral — live RSS mode).")
+
+

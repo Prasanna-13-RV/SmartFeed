@@ -1,12 +1,12 @@
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
-from pymongo.errors import PyMongoError
 from typing import List, Literal, Optional
 
 from app.services.post_service import (
     get_random_headlines,
     generate_for_post,
     generate_for_queued,
+    generate_latest,
     list_posts,
     process_rss_items,
     retry_failed,
@@ -20,6 +20,8 @@ class GenerateRequest(BaseModel):
     rss_id: Optional[str] = None
     limit: int = 10
     audio_path: Optional[str] = None
+    platform: Optional[str] = None  # 'instagram' or 'youtube'
+    template: int = 1  # 1=dark, 2=light/navy, 3=photo (instagram only)
 
 
 class RetryRequest(BaseModel):
@@ -33,28 +35,19 @@ class UploadSelectedRequest(BaseModel):
     audio_path: Optional[str] = None
 
 
-@router.get("/posts", responses={503: {"description": "Database unavailable"}})
+@router.get("/posts")
 def get_posts():
-    try:
-        return {"items": list_posts()}
-    except PyMongoError as exc:
-        raise HTTPException(status_code=503, detail=f"Database unavailable: {exc}") from exc
+    return {"items": list_posts()}
 
 
-@router.get("/headlines/random", responses={503: {"description": "Database unavailable"}})
+@router.get("/headlines/random")
 def get_random(limit: int = 5):
-    try:
-        return {"items": get_random_headlines(limit=limit)}
-    except PyMongoError as exc:
-        raise HTTPException(status_code=503, detail=f"Database unavailable: {exc}") from exc
+    return {"items": get_random_headlines(limit=limit)}
 
 
-@router.post("/process-rss", responses={503: {"description": "Database unavailable"}})
+@router.post("/process-rss")
 def process_rss():
-    try:
-        return process_rss_items()
-    except PyMongoError as exc:
-        raise HTTPException(status_code=503, detail=f"Database unavailable: {exc}") from exc
+    return process_rss_items()
 
 
 @router.post(
@@ -67,7 +60,12 @@ def process_rss():
 def generate(payload: GenerateRequest):
     try:
         if payload.rss_id:
-            return {"item": generate_for_post(payload.rss_id, audio_path=payload.audio_path)}
+            return {"item": generate_for_post(
+                payload.rss_id,
+                audio_path=payload.audio_path,
+                platform_override=payload.platform,
+                template=payload.template,
+            )}
         return generate_for_queued(limit=payload.limit, audio_path=payload.audio_path)
     except ValueError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
@@ -108,6 +106,39 @@ def upload_selected(payload: UploadSelectedRequest):
             platform=payload.platform,
             audio_path=payload.audio_path,
         )
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except RuntimeError as exc:
+        raise HTTPException(status_code=500, detail=str(exc)) from exc
+
+
+class GenerateLatestRequest(BaseModel):
+    platform: Literal["instagram", "youtube"]
+    template: int = 1
+    audio_path: Optional[str] = None
+
+
+@router.post(
+    "/generate-latest/",
+    summary="One-shot: fetch RSS → pick best headline → generate → upload",
+    responses={
+        400: {"description": "Invalid platform"},
+        500: {"description": "No headlines available or generation failed"},
+    },
+)
+def generate_latest_endpoint(payload: GenerateLatestRequest):
+    """
+    Called by n8n with platform='instagram' or platform='youtube'.
+    Automatically fetches fresh RSS, picks the most recent unposted headline,
+    generates the media, and returns the result.
+    """
+    try:
+        result = generate_latest(
+            platform=payload.platform,
+            template=payload.template,
+            audio_path=payload.audio_path,
+        )
+        return {"item": result}
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     except RuntimeError as exc:

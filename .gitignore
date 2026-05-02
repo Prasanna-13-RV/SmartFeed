@@ -24,7 +24,5 @@ Thumbs.db
 .idea/
 
 # Assets (large binaries - store in cloud storage)
-assets/audio/*.mp3
-assets/audio/*.wav
 assets/fonts/*.ttf
 assets/fonts/*.otf

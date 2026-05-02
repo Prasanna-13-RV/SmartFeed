@@ -1,7 +1,11 @@
 from __future__ import annotations
 
+import urllib3
 import requests
 from app.config import settings
+
+# Corporate proxies often do SSL inspection — suppress the resulting warning
+urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 
 
 def send_telegram_message(message: str) -> None:
@@ -14,4 +18,4 @@ def send_telegram_message(message: str) -> None:
         "text": message,
         "disable_web_page_preview": True,
     }
-    requests.post(url, json=payload, timeout=15)
+    requests.post(url, json=payload, timeout=15, verify=False)

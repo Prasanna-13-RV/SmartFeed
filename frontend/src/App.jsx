@@ -7,14 +7,19 @@ import {
   processRss,
   retryPost,
   uploadSelected,
+  fetchDbStatus,
 } from './api';
+import Create from './Create';
 
-function App() {
+function Dashboard() {
   const [posts, setPosts] = useState([]);
   const [loading, setLoading] = useState(false);
   const [message, setMessage] = useState('');
+  const [dbConnected, setDbConnected] = useState(null);
   const [platformFilter, setPlatformFilter] = useState('all');
   const [statusFilter, setStatusFilter] = useState('all');
+  const [page, setPage] = useState(1);
+  const PAGE_SIZE = 10;
   const [headlineCount, setHeadlineCount] = useState(5);
   const [headlinePool, setHeadlinePool] = useState([]);
   const [selectedHeadlines, setSelectedHeadlines] = useState({});
@@ -33,6 +38,24 @@ function App() {
 
   useEffect(() => {
     loadPosts();
+  }, []);
+
+  useEffect(() => {
+    let interval;
+    const checkStatus = async () => {
+      try {
+        const status = await fetchDbStatus();
+        setDbConnected(status.mongo_connected);
+        if (status.mongo_connected) {
+          clearInterval(interval);
+        }
+      } catch {
+        setDbConnected(false);
+      }
+    };
+    checkStatus();
+    interval = setInterval(checkStatus, 3000);
+    return () => clearInterval(interval);
   }, []);
 
   const stats = useMemo(() => {
@@ -62,9 +85,15 @@ function App() {
     });
   }, [posts, platformFilter, statusFilter]);
 
+  const totalPages = Math.max(1, Math.ceil(filteredPosts.length / PAGE_SIZE));
+  const pagedPosts = filteredPosts.slice((page - 1) * PAGE_SIZE, page * PAGE_SIZE);
+
+  const API_BASE = import.meta.env.VITE_API_BASE_URL || '';
+
   const runProcessRss = async () => {
     setLoading(true);
     setMessage('');
+    setPage(1);
     try {
       const result = await processRss();
       setMessage(`RSS processed: inserted ${result.inserted}, duplicates ${result.skipped_duplicates}`);
@@ -162,6 +191,11 @@ function App() {
 
   return (
     <div className="page">
+      {dbConnected === false && (
+        <div className="db-banner">
+          MongoDB is not connected — retrying in the background&hellip;
+        </div>
+      )}
       <header className="hero">
         <div>
           <h1>SmartFeed Ops Dashboard</h1>
@@ -189,7 +223,7 @@ function App() {
         <div className="filters">
           <label>
             <span>Platform</span>
-            <select value={platformFilter} onChange={(e) => setPlatformFilter(e.target.value)}>
+            <select value={platformFilter} onChange={(e) => { setPlatformFilter(e.target.value); setPage(1); }}>
               <option value="all">All</option>
               <option value="instagram">Instagram</option>
               <option value="youtube">YouTube</option>
@@ -197,7 +231,7 @@ function App() {
           </label>
           <label>
             <span>Status</span>
-            <select value={statusFilter} onChange={(e) => setStatusFilter(e.target.value)}>
+            <select value={statusFilter} onChange={(e) => { setStatusFilter(e.target.value); setPage(1); }}>
               <option value="all">All</option>
               <option value="queued">Queued</option>
               <option value="uploaded">Uploaded</option>
@@ -260,17 +294,23 @@ function App() {
             </tr>
           </thead>
           <tbody>
-            {filteredPosts.map((post) => (
+            {pagedPosts.map((post) => (
               <tr key={post.rss_id}>
                 <td>{post.title}</td>
-                <td>{post.assigned_platform}</td>
-                <td>{post.post_status}</td>
                 <td>
-                  {post.published_link ? (
-                    <a href={post.published_link} target="_blank" rel="noreferrer">Open</a>
-                  ) : (
-                    <span>-</span>
+                  <span className={`badge badge-${post.assigned_platform}`}>
+                    {post.assigned_platform === 'instagram' ? '📸 Instagram' : '▶ YouTube'}
+                  </span>
+                </td>
+                <td><span className={`badge badge-status-${post.post_status}`}>{post.post_status}</span></td>
+                <td>
+                  {post.generated_media_link && (
+                    <a href={`${API_BASE}/generated/images/${post.rss_id}.jpg`} target="_blank" rel="noreferrer">🖼 Image</a>
                   )}
+                  {post.published_link && (
+                    <> · <a href={post.published_link} target="_blank" rel="noreferrer">🔗 Link</a></>
+                  )}
+                  {!post.generated_media_link && !post.published_link && <span>-</span>}
                 </td>
                 <td>
                   <button onClick={() => onGenerateSingle(post.rss_id)} disabled={loading}>Generate</button>
@@ -278,16 +318,47 @@ function App() {
                 </td>
               </tr>
             ))}
-            {!filteredPosts.length && (
+            {!pagedPosts.length && (
               <tr>
                 <td colSpan={5}>No posts found for current filters.</td>
               </tr>
             )}
           </tbody>
         </table>
+        {totalPages > 1 && (
+          <div className="pagination">
+            <button onClick={() => setPage(p => Math.max(1, p - 1))} disabled={page === 1}>← Prev</button>
+            <span>Page {page} of {totalPages}</span>
+            <button onClick={() => setPage(p => Math.min(totalPages, p + 1))} disabled={page === totalPages}>Next →</button>
+          </div>
+        )}
       </section>
     </div>
   );
 }
 
-export default App;
+export default function App() {
+  const [currentPage, setCurrentPage] = useState('dashboard'); // 'dashboard' or 'create'
+
+  return (
+    <div>
+      {/* Page Navigation */}
+      <nav className="page-nav">
+        <button 
+          className={`nav-btn ${currentPage === 'dashboard' ? 'active' : ''}`}
+          onClick={() => setCurrentPage('dashboard')}
+        >
+          📊 Dashboard
+        </button>
+        <button 
+          className={`nav-btn ${currentPage === 'create' ? 'active' : ''}`}
+          onClick={() => setCurrentPage('create')}
+        >
+          ✏️ Content Creator
+        </button>
+      </nav>
+
+      {currentPage === 'dashboard' ? <Dashboard /> : <Create />}
+    </div>
+  );
+}

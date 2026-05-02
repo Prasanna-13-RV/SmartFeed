@@ -1,103 +1,460 @@
 from __future__ import annotations
 
-import os
-import subprocess
+import io
 from pathlib import Path
 from typing import Optional
 
+import requests as _rq
 from PIL import Image, ImageDraw, ImageFont
 
 from app.config import settings
 
+_HERE = Path(__file__).resolve().parent
+_PROJECT_ROOT = _HERE.parent.parent.parent
+
+_FONT_CANDIDATES = [
+    Path(settings.font_path),
+    _PROJECT_ROOT / "assets" / "fonts" / "Montserrat-Regular.ttf",
+    Path("../assets/fonts/Montserrat-Regular.ttf"),
+    # Linux (Render / Docker with fonts-liberation)
+    Path("/usr/share/fonts/truetype/liberation/LiberationSans-Bold.ttf"),
+    Path("/usr/share/fonts/truetype/liberation/LiberationSans-Regular.ttf"),
+    Path("/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf"),
+    Path("/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf"),
+    # Windows fallbacks
+    Path("C:/Windows/Fonts/arialbd.ttf"),
+    Path("C:/Windows/Fonts/arial.ttf"),
+    Path("C:/Windows/Fonts/calibrib.ttf"),
+    Path("C:/Windows/Fonts/segoeui.ttf"),
+]
+
 
 def _load_font(size: int) -> ImageFont.FreeTypeFont | ImageFont.ImageFont:
-    try:
-        return ImageFont.truetype(settings.font_path, size=size)
-    except Exception:
-        return ImageFont.load_default()
+    for candidate in _FONT_CANDIDATES:
+        try:
+            return ImageFont.truetype(str(candidate), size=size)
+        except Exception:
+            continue
+    return ImageFont.load_default()
 
 
-def _wrap_text(draw: ImageDraw.ImageDraw, text: str, font: ImageFont.ImageFont, max_width: int) -> str:
+def _wrap_text(draw, text: str, font, max_width: int, max_lines: int = 5) -> list[str]:
     words = text.split()
-    lines = []
-    current = []
-
+    lines: list[str] = []
+    current: list[str] = []
     for word in words:
         trial = " ".join(current + [word])
-        width = draw.textbbox((0, 0), trial, font=font)[2]
-        if width <= max_width:
+        if draw.textbbox((0, 0), trial, font=font)[2] <= max_width:
             current.append(word)
         else:
-            lines.append(" ".join(current))
+            if current:
+                lines.append(" ".join(current))
             current = [word]
-
-    if current:
+        if len(lines) >= max_lines:
+            break
+    if current and len(lines) < max_lines:
         lines.append(" ".join(current))
+    return lines[:max_lines]
 
-    return "\n".join(lines[:5])
+
+def _draw_centered(draw, text: str, y: int, font, fill, canvas_w: int) -> None:
+    bbox = draw.textbbox((0, 0), text, font=font)
+    x = (canvas_w - (bbox[2] - bbox[0])) // 2
+    draw.text((x, y), text, fill=fill, font=font)
 
 
-def generate_instagram_image(post: dict) -> str:
-    output_dir = Path(settings.output_dir) / "images"
-    output_dir.mkdir(parents=True, exist_ok=True)
+def _overlay(canvas: Image.Image, x: int, y: int, w: int, h: int,
+             color: tuple = (0, 0, 0), alpha: int = 150) -> Image.Image:
+    """Composite a semi-transparent colored rectangle over the canvas region."""
+    ov = Image.new("RGBA", canvas.size, (0, 0, 0, 0))
+    ImageDraw.Draw(ov).rectangle([(x, y), (x + w, y + h)], fill=(*color, alpha))
+    return Image.alpha_composite(canvas.convert("RGBA"), ov).convert("RGB")
 
-    canvas = Image.new("RGB", (1080, 1080), color=(20, 28, 40))
+
+def _fetch_rss_image(url: str, size: tuple[int, int]) -> Optional[Image.Image]:
+    """Download and smart-crop RSS image to exact target size. Returns None on failure."""
+    if not url:
+        return None
+    try:
+        resp = _rq.get(url, timeout=8, headers={"User-Agent": "Mozilla/5.0"})
+        resp.raise_for_status()
+        img = Image.open(io.BytesIO(resp.content)).convert("RGB")
+        img_w, img_h = img.size
+        tw, th = size
+        scale = max(tw / img_w, th / img_h)
+        nw, nh = int(img_w * scale), int(img_h * scale)
+        img = img.resize((nw, nh), Image.LANCZOS)
+        left = (nw - tw) // 2
+        top = (nh - th) // 2
+        return img.crop((left, top, left + tw, top + th))
+    except Exception as e:
+        print(f"[media] RSS image fetch failed: {e}")
+        return None
+
+
+# ─────────────────────────────────────────────────
+#  INSTAGRAM TEMPLATES  (1080 × 1080)
+# ─────────────────────────────────────────────────
+
+def _ig_dark(post: dict, out_path: Path) -> None:
+    """Template 1 — Dark Bold (orange accent, RSS photo strip)"""
+    W, H = 1080, 1080
+    FOOTER_TOP = H - 110
+    canvas = Image.new("RGB", (W, H), (18, 22, 38))
+
+    rss_img = _fetch_rss_image(post.get("image_url", ""), (W, 310))
+    has_img = rss_img is not None
+    if has_img:
+        canvas.paste(rss_img, (0, 215))
+        canvas = _overlay(canvas, 0, 215, W, 310, (18, 22, 38), 155)
+
     draw = ImageDraw.Draw(canvas)
+    draw.rectangle([(0, 0), (W, 210)], fill=(210, 55, 15))
+    draw.rectangle([(0, 210), (W, 218)], fill=(255, 100, 40))
+    draw.rectangle([(0, FOOTER_TOP), (W, H)], fill=(10, 12, 22))
 
-    # Reusable branded template blocks for all generated posts.
-    draw.rectangle([(0, 0), (1080, 250)], fill=(233, 84, 32))
-    draw.rectangle([(0, 820), (1080, 1080)], fill=(15, 18, 28))
+    brand_font = _load_font(56)
+    _draw_centered(draw, "SMARTFEED", 72, brand_font, "white", W)
+
+    cat_font = _load_font(28)
+    cat_text = f"  #{post.get('category', 'news').upper()}  "
+    cb = draw.textbbox((0, 0), cat_text, font=cat_font)
+    cw = cb[2] - cb[0] + 24
+    ch = cb[3] - cb[1] + 24
+    cat_y = 540 if has_img else 240
+    pill_x = (W - cw) // 2
+    draw.rounded_rectangle([(pill_x, cat_y), (pill_x + cw, cat_y + ch)], radius=14, fill=(255, 100, 40))
+    _draw_centered(draw, cat_text, cat_y + 8, cat_font, "white", W)
+
+    title_font = _load_font(46)
+    title_lines = _wrap_text(draw, post["title"], title_font, W - 100, max_lines=3)
+    y = cat_y + ch + 18
+    for line in title_lines:
+        _draw_centered(draw, line, y, title_font, (255, 255, 255), W)
+        y += 56
+
+    desc = (post.get("description") or "").strip()
+    if desc:
+        y += 10
+        draw.rectangle([(W // 2 - 80, y), (W // 2 + 80, y + 3)], fill=(255, 100, 40))
+        y += 16
+        desc_font = _load_font(24)
+        line_h = 32
+        max_desc = max(1, min(5, (FOOTER_TOP - 20 - y) // line_h))
+        for line in _wrap_text(draw, desc, desc_font, W - 120, max_lines=max_desc):
+            _draw_centered(draw, line, y, desc_font, (190, 198, 215), W)
+            y += line_h
+
+    canvas.save(str(out_path), quality=95)
+
+
+def _ig_light(post: dict, out_path: Path) -> None:
+    """Template 2 — Light Clean (white background, blue accent)"""
+    W, H = 1080, 1080
+    canvas = Image.new("RGB", (W, H), (248, 250, 255))
+
+    rss_img = _fetch_rss_image(post.get("image_url", ""), (W, 370))
+    has_img = rss_img is not None
+    if has_img:
+        canvas.paste(rss_img, (0, 0))
+        canvas = _overlay(canvas, 0, 0, W, 370, (248, 250, 255), 40)
+
+    draw = ImageDraw.Draw(canvas)
+    draw.rectangle([(0, 0), (W, 8)], fill=(37, 99, 235))
+    if has_img:
+        draw.rectangle([(0, 370), (W, 378)], fill=(37, 99, 235))
+
+    content_y = 398 if has_img else 90
+    brand_font = _load_font(40)
+    _draw_centered(draw, "SMARTFEED", content_y, brand_font, (37, 99, 235), W)
+
+    cat_font = _load_font(28)
+    cat_text = f"  #{post.get('category', 'news').upper()}  "
+    cb = draw.textbbox((0, 0), cat_text, font=cat_font)
+    cw = cb[2] - cb[0] + 24
+    ch = cb[3] - cb[1] + 24
+    cat_y = content_y + 58
+    pill_x = (W - cw) // 2
+    draw.rounded_rectangle([(pill_x, cat_y), (pill_x + cw, cat_y + ch)], radius=14, fill=(37, 99, 235))
+    _draw_centered(draw, cat_text, cat_y + 8, cat_font, "white", W)
+
+    title_font = _load_font(52)
+    title_lines = _wrap_text(draw, post["title"], title_font, W - 100, max_lines=4)
+    y = cat_y + ch + 28
+    for line in title_lines:
+        _draw_centered(draw, line, y, title_font, (15, 23, 42), W)
+        y += 64
+
+    y += 10
+    draw.rectangle([(W // 2 - 60, y), (W // 2 + 60, y + 3)], fill=(37, 99, 235))
+    y += 22
+
+    desc = (post.get("description") or "").strip()
+    if desc and y < 960:
+        desc_font = _load_font(28)
+        for line in _wrap_text(draw, desc, desc_font, W - 120, max_lines=5):
+            _draw_centered(draw, line, y, desc_font, (75, 85, 115), W)
+            y += 40
+
+    draw.rectangle([(0, H - 8), (W, H)], fill=(37, 99, 235))
+    canvas.save(str(out_path), quality=95)
+
+
+def _ig_photo(post: dict, out_path: Path) -> None:
+    """Template 3 — Photo Overlay (RSS image as full background)"""
+    W, H = 1080, 1080
+    canvas = Image.new("RGB", (W, H), (20, 20, 30))
+
+    rss_img = _fetch_rss_image(post.get("image_url", ""), (W, H))
+    if rss_img:
+        canvas.paste(rss_img, (0, 0))
+
+    canvas = _overlay(canvas, 0, 0, W, H, (0, 0, 0), 165)
+    canvas = _overlay(canvas, 0, 0, W, 240, (0, 0, 0), 80)
+    canvas = _overlay(canvas, 0, H - 140, W, 140, (0, 0, 0), 100)
+
+    draw = ImageDraw.Draw(canvas)
+    ACCENT = (233, 69, 96)
+
+    brand_font = _load_font(48)
+    smart_bbox = draw.textbbox((60, 60), "SMART", font=brand_font)
+    draw.text((60, 60), "SMART", fill="white", font=brand_font)
+    draw.text((smart_bbox[2], 60), "FEED", fill=ACCENT, font=brand_font)
+
+    cat_font = _load_font(30)
+    cat_text = f"#{post.get('category', 'news').upper()}"
+    cb = draw.textbbox((0, 0), cat_text, font=cat_font)
+    cw, ch = cb[2] - cb[0] + 24, cb[3] - cb[1] + 24
+    draw.rounded_rectangle([(60, 138), (60 + cw, 138 + ch)], radius=12, fill=ACCENT)
+    draw.text((72, 144), cat_text, fill="white", font=cat_font)
 
     title_font = _load_font(56)
-    badge_font = _load_font(38)
+    title_lines = _wrap_text(draw, post["title"], title_font, W - 100, max_lines=4)
+    y = 340
+    for line in title_lines:
+        _draw_centered(draw, line, y, title_font, (255, 255, 255), W)
+        y += 70
 
-    draw.text((60, 70), "SMARTFEED", fill="white", font=badge_font)
-    wrapped = _wrap_text(draw, post["title"], title_font, 950)
-    draw.multiline_text((60, 310), wrapped, fill="white", font=title_font, spacing=12)
-    draw.text((60, 900), f"#{post['category']}  |  @{post['assigned_platform']}", fill=(205, 210, 222), font=badge_font)
+    y += 16
+    draw.rectangle([(W // 2 - 80, y), (W // 2 + 80, y + 3)], fill=ACCENT)
+    y += 22
 
+    desc = (post.get("description") or "").strip()
+    if desc:
+        desc_font = _load_font(30)
+        for line in _wrap_text(draw, desc, desc_font, W - 120, max_lines=5):
+            _draw_centered(draw, line, y, desc_font, (220, 225, 235), W)
+            y += 42
+
+    canvas.save(str(out_path), quality=95)
+
+
+def generate_instagram_image(post: dict, template: int = 1) -> str:
+    output_dir = Path(settings.output_dir) / "images"
+    output_dir.mkdir(parents=True, exist_ok=True)
     out_path = output_dir / f"{post['rss_id']}.jpg"
-    canvas.save(out_path, quality=92)
+    if template == 2:
+        _ig_light(post, out_path)
+    elif template == 3:
+        _ig_photo(post, out_path)
+    else:
+        _ig_dark(post, out_path)
     return str(out_path)
 
 
-def generate_youtube_short(post: dict, image_path: str, audio_path: Optional[str] = None) -> str:
+# ─────────────────────────────────────────────────
+#  YOUTUBE TEMPLATES  (1080 × 1080)
+# ─────────────────────────────────────────────────
+
+def _yt_photo(post: dict, out_path: Path) -> None:
+    """Video template — Full RSS image background with dark overlay, text on top"""
+    W, H = 1080, 1080
+    ACCENT = (255, 100, 40)  # orange — matches Instagram Dark Bold
+
+    canvas = Image.new("RGB", (W, H), (20, 20, 30))
+
+    rss_img = _fetch_rss_image(post.get("image_url", ""), (W, H))
+    if rss_img:
+        canvas.paste(rss_img, (0, 0))
+
+    # Uniform dark overlay across entire canvas — no gaps
+    canvas = _overlay(canvas, 0, 0, W, H, (0, 0, 0), 195)
+    # Extra darkening at top (brand area) and bottom
+    canvas = _overlay(canvas, 0, 0, W, 200, (0, 0, 0), 80)
+    canvas = _overlay(canvas, 0, H - 100, W, 100, (0, 0, 0), 80)
+
+    draw = ImageDraw.Draw(canvas)
+
+    # ── Brand top-left ──
+    brand_font = _load_font(52)
+    smart_bbox = draw.textbbox((56, 48), "SMART", font=brand_font)
+    draw.text((56, 48), "SMART", fill="white", font=brand_font)
+    draw.text((smart_bbox[2], 48), "FEED", fill=ACCENT, font=brand_font)
+
+    # ── Category pill below brand ──
+    cat_font = _load_font(32)
+    cat_text = f"#{post.get('category', 'news').upper()}"
+    cb = draw.textbbox((0, 0), cat_text, font=cat_font)
+    cw, ch = cb[2] - cb[0] + 28, cb[3] - cb[1] + 20
+    draw.rounded_rectangle([(56, 132), (56 + cw, 132 + ch)], radius=12, fill=ACCENT)
+    draw.text((68, 138), cat_text, fill="white", font=cat_font)
+
+    # ── Measure content block height to vertically centre it ──
+    title_font = _load_font(62)
+    title_lines = _wrap_text(draw, post["title"], title_font, W - 100, max_lines=4)
+    title_line_h = 78
+    title_block_h = len(title_lines) * title_line_h
+
+    desc = (post.get("description") or "").strip()
+    desc_font = _load_font(32)
+    desc_line_h = 50
+    desc_lines = _wrap_text(draw, desc, desc_font, W - 120, max_lines=6) if desc else []
+    desc_block_h = len(desc_lines) * desc_line_h
+
+    divider_h = 30  # divider + spacing
+    content_h = title_block_h + divider_h + desc_block_h
+
+    # Centre between bottom of category pill (≈185) and bottom of canvas (H - 80)
+    content_top = 185
+    content_bottom = H - 80
+    available = content_bottom - content_top
+    y = content_top + (available - content_h) // 2
+
+    # ── Title (centred) ──
+    for line in title_lines:
+        _draw_centered(draw, line, y, title_font, (255, 255, 255), W)
+        y += title_line_h
+
+    # ── Divider ──
+    y += 14
+    draw.rectangle([(W // 2 - 90, y), (W // 2 + 90, y + 3)], fill=ACCENT)
+    y += 20
+
+    # ── Description (centred) ──
+    for line in desc_lines:
+        _draw_centered(draw, line, y, desc_font, (220, 225, 235), W)
+        y += desc_line_h
+
+    canvas.save(str(out_path), quality=95)
+
+
+def _yt_navy(post: dict, out_path: Path) -> None:
+    # routes to photo template
+    _yt_photo(post, out_path)
+
+
+def _yt_breaking(post: dict, out_path: Path) -> None:
+    # kept for compatibility — routes to photo template
+    _yt_photo(post, out_path)
+
+
+def generate_youtube_image(post: dict, template: int = 1) -> str:
+    output_dir = Path(settings.output_dir) / "images"
+    output_dir.mkdir(parents=True, exist_ok=True)
+    img_path = output_dir / f"{post['rss_id']}_yt.jpg"
+    if template == 2:
+        _yt_breaking(post, img_path)
+    else:
+        _yt_navy(post, img_path)
+    return str(img_path)
+
+
+def generate_youtube_short(post: dict, template: int = 1, audio_path: Optional[str] = None) -> str:
+    """Generate 1080x1080 MP4 with optional background audio."""
+    import time as _time
+    yt_image_path = generate_youtube_image(post, template=template)
     output_dir = Path(settings.output_dir) / "videos"
     output_dir.mkdir(parents=True, exist_ok=True)
+    # Use timestamp nonce so each generation produces a unique file (avoids browser cache)
+    _nonce = int(_time.time() * 1000)
+    video_path = output_dir / f"{post['rss_id']}_{_nonce}.mp4"
+    silent_path = output_dir / f"{post['rss_id']}_{_nonce}_silent.mp4"
 
-    video_path = output_dir / f"{post['rss_id']}.mp4"
-
-    cmd = [
-        settings.ffmpeg_binary,
-        "-y",
-        "-loop",
-        "1",
-        "-i",
-        image_path,
-    ]
-
-    if audio_path and os.path.exists(audio_path):
-        cmd += ["-i", audio_path]
-
-    cmd += [
-        "-vf",
-        "scale=1080:1080, pad=1080:1920:0:420:color=black",
-        "-t",
-        "12",
-        "-r",
-        "30",
-        "-c:v",
-        "libx264",
-        "-pix_fmt",
-        "yuv420p",
-    ]
-
-    if audio_path and os.path.exists(audio_path):
-        cmd += ["-shortest", "-c:a", "aac"]
+    # Pick audio: use provided path, or pick randomly from assets/audio/
+    resolved_audio: Optional[Path] = None
+    if audio_path and Path(audio_path).exists():
+        resolved_audio = Path(audio_path)
     else:
-        cmd += ["-an"]
+        audio_dir = _PROJECT_ROOT / "assets" / "audio"
+        audio_files = list(audio_dir.glob("*.mp3")) + list(audio_dir.glob("*.wav"))
+        if audio_files:
+            import random as _random
+            _random.shuffle(audio_files)  # shuffle so selection varies every call
+            resolved_audio = audio_files[0]
 
-    cmd.append(str(video_path))
+    try:
+        import imageio  # type: ignore
+        import numpy as np  # type: ignore
 
-    subprocess.run(cmd, check=True)
-    return str(video_path)
+        img = Image.open(yt_image_path).convert("RGB").resize((1080, 1080), Image.LANCZOS)
+        frame = np.array(img)
+        fps, dur = 30, 10
+
+        # Write silent video first
+        out_target = str(silent_path) if resolved_audio else str(video_path)
+        with imageio.get_writer(out_target, fps=fps, quality=8, macro_block_size=None) as writer:
+            for _ in range(fps * dur):
+                writer.append_data(frame)
+
+        # Mix in background audio via ffmpeg if available
+        if resolved_audio:
+            import subprocess, shutil, random as _rnd
+            ffmpeg_bin = settings.ffmpeg_binary
+            _ffmpeg_found = shutil.which(ffmpeg_bin) or (Path(ffmpeg_bin).is_file() and str(Path(ffmpeg_bin)))
+            if _ffmpeg_found:
+                # Probe audio duration so we pick a valid random start point
+                probe = subprocess.run(
+                    [ffmpeg_bin, "-i", str(resolved_audio)],
+                    capture_output=True, text=True
+                )
+                duration = 60  # safe default if probe fails
+                for line in probe.stderr.splitlines():
+                    if "Duration" in line:
+                        try:
+                            t = line.split("Duration:")[1].split(",")[0].strip()
+                            h, m, s = t.split(":")
+                            duration = int(h) * 3600 + int(m) * 60 + float(s)
+                        except Exception:
+                            pass
+
+                # Random start: anywhere in the song leaving at least 10s to end
+                max_start = max(0, int(duration) - 10)
+                start = _rnd.randint(0, max_start)
+
+                cmd = [
+                    ffmpeg_bin, "-y",
+                    "-ss", str(start),           # random start position in the song
+                    "-i", str(resolved_audio),
+                    "-t", "10",                  # take exactly 10 seconds
+                    "-i", str(silent_path),
+                    "-map", "1:v", "-map", "0:a",
+                    "-c:v", "copy",
+                    "-c:a", "aac", "-b:a", "128k",
+                    "-shortest",
+                    "-filter:a", "volume=0.35",  # subtle background (35%)
+                    str(video_path),
+                ]
+                result = subprocess.run(cmd, capture_output=True)
+                if result.returncode == 0:
+                    silent_path.unlink(missing_ok=True)
+                    print(f"[media] Audio mixed: {resolved_audio.name} (start={start}s)")
+                else:
+                    print(f"[media] ffmpeg audio mix failed, using silent video")
+                    silent_path.rename(video_path)
+            else:
+                print(f"[media] ffmpeg not found — using silent video")
+                silent_path.rename(video_path)
+
+        print(f"[media] YouTube Short saved: {video_path}")
+        return str(video_path)
+
+    except ImportError:
+        print("[media] imageio not installed — returning YouTube image")
+        return yt_image_path
+    except Exception as e:
+        import traceback
+        print(f"[media] Video generation failed: {e}")
+        traceback.print_exc()
+        return yt_image_path
+
+

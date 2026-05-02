@@ -1,10 +1,10 @@
 import axios from 'axios';
 
-const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || 'http://localhost:8000';
+const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || '';
 
 const api = axios.create({
   baseURL: API_BASE_URL,
-  timeout: 15000,
+  timeout: 60000,  // 60s for video generation
 });
 
 export const fetchPosts = async () => {
@@ -22,9 +22,9 @@ export const fetchRandomHeadlines = async (limit = 5) => {
   return data.items || [];
 };
 
-export const generatePost = async (rssId) => {
-  const { data } = await api.post('/generate/', { rss_id: rssId });
-  return data;
+export const generatePost = async (rssId, platform, template = 1) => {
+  const { data } = await api.post('/generate/', { rss_id: rssId, platform, template });
+  return data.item;  // unwrap from { item: {...} }
 };
 
 export const generateBatch = async (limit = 10) => {
@@ -42,5 +42,10 @@ export const uploadSelected = async (rssIds, platform) => {
     rss_ids: rssIds,
     platform,
   });
+  return data;
+};
+
+export const fetchDbStatus = async () => {
+  const { data } = await api.get('/status');
   return data;
 };

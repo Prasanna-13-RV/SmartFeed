@@ -1,6 +1,11 @@
 fastapi==0.116.1
 uvicorn[standard]==0.35.0
-pymongo==4.10.1
 pillow==11.1.0
 python-dotenv==1.0.1
 requests==2.32.3
+imageio==2.37.0
+imageio-ffmpeg==0.5.1
+numpy==2.2.5
+google-auth==2.29.0
+google-auth-oauthlib==1.2.0
+google-api-python-client==2.125.0

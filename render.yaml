@@ -1,0 +1,22 @@
+services:
+  - type: web
+    name: smartfeed-backend
+    runtime: python
+    rootDir: backend          # deploy only the backend subfolder
+    buildCommand: apt-get install -y ffmpeg && pip install -r requirements.txt
+    startCommand: uvicorn app.main:app --host 0.0.0.0 --port $PORT --workers 1
+    plan: free                # free tier is fine — n8n calls it on demand
+    region: singapore         # closest to India
+    healthCheckPath: /ping
+
+    envVars:
+      - key: BASE_URL
+        sync: false           # set to your Render URL after first deploy
+      - key: OUTPUT_DIR
+        value: /tmp/generated # ephemeral — files only need to exist long enough to serve
+      - key: FFMPEG_BINARY
+        value: ffmpeg           # ffmpeg is in PATH on Render Linux
+      - key: FONT_PATH
+        value: ../assets/fonts/Montserrat-Regular.ttf
+      - key: RELOAD
+        value: "0"
