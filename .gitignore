@@ -9,6 +9,9 @@ backend/generated/
 # Environment secrets - NEVER commit these
 backend/.env
 .env
+cookies.txt
+**/cookies.txt
+*.txt.bak
 
 # Node
 frontend/node_modules/
