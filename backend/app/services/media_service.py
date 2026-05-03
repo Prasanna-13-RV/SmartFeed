@@ -362,15 +362,35 @@ def generate_youtube_image(post: dict, template: int = 1) -> str:
 
 
 def generate_youtube_short(post: dict, template: int = 1, audio_path: Optional[str] = None) -> str:
-    """Generate 1080x1080 MP4 with optional background audio."""
+    """Generate 1080x1920 MP4 with optional background audio.
+
+    Uses ``ffmpeg -loop 1`` to turn the static image into a video instead of
+    loading all frames into memory via imageio, keeping RAM well under 512 MB.
+    """
+    import shutil as _shutil
+    import subprocess as _subprocess
     import time as _time
+
     yt_image_path = generate_youtube_image(post, template=template)
     output_dir = Path(settings.output_dir) / "videos"
     output_dir.mkdir(parents=True, exist_ok=True)
-    # Use timestamp nonce so each generation produces a unique file (avoids browser cache)
     _nonce = int(_time.time() * 1000)
     video_path = output_dir / f"{post['rss_id']}_{_nonce}.mp4"
     silent_path = output_dir / f"{post['rss_id']}_{_nonce}_silent.mp4"
+
+    # Resolve ffmpeg binary
+    ffmpeg_bin = settings.ffmpeg_binary
+    if not _shutil.which(ffmpeg_bin) and not Path(ffmpeg_bin).is_file():
+        try:
+            import imageio_ffmpeg as _ioff  # type: ignore
+            ffmpeg_bin = _ioff.get_ffmpeg_exe()
+            print(f"[media] Using imageio-ffmpeg bundled binary: {ffmpeg_bin}")
+        except Exception:
+            ffmpeg_bin = None
+
+    if not ffmpeg_bin:
+        print("[media] ffmpeg not available — returning YouTube image")
+        return yt_image_path
 
     # Pick audio: use provided path, or pick randomly from assets/audio/
     resolved_audio: Optional[Path] = None
@@ -381,86 +401,76 @@ def generate_youtube_short(post: dict, template: int = 1, audio_path: Optional[s
         audio_files = list(audio_dir.glob("*.mp3")) + list(audio_dir.glob("*.wav"))
         if audio_files:
             import random as _random
-            _random.shuffle(audio_files)  # shuffle so selection varies every call
+            _random.shuffle(audio_files)
             resolved_audio = audio_files[0]
 
     try:
-        import imageio  # type: ignore
-        import numpy as np  # type: ignore
-
-        img = Image.open(yt_image_path).convert("RGB").resize((1080, 1920), Image.LANCZOS)
-        frame = np.array(img)
-        fps, dur = 30, 10
-
-        # Write silent video first
+        # ── Step 1: create silent video from static image (memory-efficient) ──
+        # ffmpeg -loop 1 reads one frame and streams it for -t seconds;
+        # it never allocates a frame buffer per output frame.
         out_target = str(silent_path) if resolved_audio else str(video_path)
-        with imageio.get_writer(out_target, fps=fps, quality=8, macro_block_size=None) as writer:
-            for _ in range(fps * dur):
-                writer.append_data(frame)
+        silent_cmd = [
+            ffmpeg_bin, "-y",
+            "-loop", "1",
+            "-i", str(yt_image_path),
+            "-t", "10",
+            "-vf", "scale=1080:1920:force_original_aspect_ratio=decrease,"
+                   "pad=1080:1920:(ow-iw)/2:(oh-ih)/2",
+            "-c:v", "libx264", "-preset", "ultrafast",
+            "-pix_fmt", "yuv420p",
+            "-r", "30",
+            out_target,
+        ]
+        result = _subprocess.run(silent_cmd, capture_output=True)
+        if result.returncode != 0:
+            print(f"[media] ffmpeg image→video failed: {result.stderr.decode(errors='replace')}")
+            return yt_image_path
 
-        # Mix in background audio via ffmpeg if available
+        # ── Step 2: mix in background audio (optional) ──
         if resolved_audio:
-            import subprocess, shutil, random as _rnd
-            ffmpeg_bin = settings.ffmpeg_binary
-            _ffmpeg_found = shutil.which(ffmpeg_bin) or (Path(ffmpeg_bin).is_file() and str(Path(ffmpeg_bin)))
-            if not _ffmpeg_found:
-                try:
-                    import imageio_ffmpeg as _ioff  # type: ignore
-                    ffmpeg_bin = _ioff.get_ffmpeg_exe()
-                    _ffmpeg_found = ffmpeg_bin
-                    print(f"[media] Using imageio-ffmpeg bundled binary: {ffmpeg_bin}")
-                except Exception:
-                    pass
-            if _ffmpeg_found:
-                # Probe audio duration so we pick a valid random start point
-                probe = subprocess.run(
-                    [ffmpeg_bin, "-i", str(resolved_audio)],
-                    capture_output=True, text=True
-                )
-                duration = 60  # safe default if probe fails
-                for line in probe.stderr.splitlines():
-                    if "Duration" in line:
-                        try:
-                            t = line.split("Duration:")[1].split(",")[0].strip()
-                            h, m, s = t.split(":")
-                            duration = int(h) * 3600 + int(m) * 60 + float(s)
-                        except Exception:
-                            pass
+            import random as _rnd
+            # Probe audio duration so we pick a valid random start point
+            probe = _subprocess.run(
+                [ffmpeg_bin, "-i", str(resolved_audio)],
+                capture_output=True, text=True,
+            )
+            duration = 60  # safe default if probe fails
+            for line in probe.stderr.splitlines():
+                if "Duration" in line:
+                    try:
+                        t = line.split("Duration:")[1].split(",")[0].strip()
+                        h, m, s = t.split(":")
+                        duration = int(h) * 3600 + int(m) * 60 + float(s)
+                    except Exception:
+                        pass
 
-                # Random start: anywhere in the song leaving at least 10s to end
-                max_start = max(0, int(duration) - 10)
-                start = _rnd.randint(0, max_start)
+            max_start = max(0, int(duration) - 10)
+            start = _rnd.randint(0, max_start)
 
-                cmd = [
-                    ffmpeg_bin, "-y",
-                    "-ss", str(start),           # random start position in the song
-                    "-i", str(resolved_audio),
-                    "-t", "10",                  # take exactly 10 seconds
-                    "-i", str(silent_path),
-                    "-map", "1:v", "-map", "0:a",
-                    "-c:v", "copy",
-                    "-c:a", "aac", "-b:a", "128k",
-                    "-shortest",
-                    "-filter:a", "volume=0.35",  # subtle background (35%)
-                    str(video_path),
-                ]
-                result = subprocess.run(cmd, capture_output=True)
-                if result.returncode == 0:
-                    silent_path.unlink(missing_ok=True)
-                    print(f"[media] Audio mixed: {resolved_audio.name} (start={start}s)")
-                else:
-                    print(f"[media] ffmpeg audio mix failed, using silent video")
-                    silent_path.rename(video_path)
+            mix_cmd = [
+                ffmpeg_bin, "-y",
+                "-ss", str(start),
+                "-i", str(resolved_audio),
+                "-t", "10",
+                "-i", str(silent_path),
+                "-map", "1:v", "-map", "0:a",
+                "-c:v", "copy",
+                "-c:a", "aac", "-b:a", "128k",
+                "-shortest",
+                "-filter:a", "volume=0.35",
+                str(video_path),
+            ]
+            mix_result = _subprocess.run(mix_cmd, capture_output=True)
+            if mix_result.returncode == 0:
+                silent_path.unlink(missing_ok=True)
+                print(f"[media] Audio mixed: {resolved_audio.name} (start={start}s)")
             else:
-                print(f"[media] ffmpeg not found — using silent video")
+                print("[media] ffmpeg audio mix failed, using silent video")
                 silent_path.rename(video_path)
 
         print(f"[media] YouTube Short saved: {video_path}")
         return str(video_path)
 
-    except ImportError:
-        print("[media] imageio not installed — returning YouTube image")
-        return yt_image_path
     except Exception as e:
         import traceback
         print(f"[media] Video generation failed: {e}")

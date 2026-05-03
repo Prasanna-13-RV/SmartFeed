@@ -7,6 +7,7 @@ from fastapi.staticfiles import StaticFiles
 
 from app.config import settings
 from app.routes.posts import router as posts_router
+from app.routes.clips import clips_router, video_router
 from app.utils.db import start_mongo_retry_thread
 
 
@@ -65,3 +66,5 @@ def root() -> dict:
 
 
 app.include_router(posts_router)
+app.include_router(clips_router)
+app.include_router(video_router)
