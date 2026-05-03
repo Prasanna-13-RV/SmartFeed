@@ -7,15 +7,14 @@ import {
   processRss,
   retryPost,
   uploadSelected,
-  fetchDbStatus,
 } from './api';
 import Create from './Create';
+import Settings from './Settings';
 
 function Dashboard() {
   const [posts, setPosts] = useState([]);
   const [loading, setLoading] = useState(false);
   const [message, setMessage] = useState('');
-  const [dbConnected, setDbConnected] = useState(null);
   const [platformFilter, setPlatformFilter] = useState('all');
   const [statusFilter, setStatusFilter] = useState('all');
   const [page, setPage] = useState(1);
@@ -38,24 +37,6 @@ function Dashboard() {
 
   useEffect(() => {
     loadPosts();
-  }, []);
-
-  useEffect(() => {
-    let interval;
-    const checkStatus = async () => {
-      try {
-        const status = await fetchDbStatus();
-        setDbConnected(status.mongo_connected);
-        if (status.mongo_connected) {
-          clearInterval(interval);
-        }
-      } catch {
-        setDbConnected(false);
-      }
-    };
-    checkStatus();
-    interval = setInterval(checkStatus, 3000);
-    return () => clearInterval(interval);
   }, []);
 
   const stats = useMemo(() => {
@@ -191,11 +172,6 @@ function Dashboard() {
 
   return (
     <div className="page">
-      {dbConnected === false && (
-        <div className="db-banner">
-          MongoDB is not connected — retrying in the background&hellip;
-        </div>
-      )}
       <header className="hero">
         <div>
           <h1>SmartFeed Ops Dashboard</h1>
@@ -338,27 +314,40 @@ function Dashboard() {
 }
 
 export default function App() {
-  const [currentPage, setCurrentPage] = useState('dashboard'); // 'dashboard' or 'create'
+  const [currentPage, setCurrentPage] = useState('dashboard');
 
   return (
     <div>
-      {/* Page Navigation */}
-      <nav className="page-nav">
-        <button 
-          className={`nav-btn ${currentPage === 'dashboard' ? 'active' : ''}`}
-          onClick={() => setCurrentPage('dashboard')}
-        >
-          📊 Dashboard
-        </button>
-        <button 
-          className={`nav-btn ${currentPage === 'create' ? 'active' : ''}`}
-          onClick={() => setCurrentPage('create')}
-        >
-          ✏️ Content Creator
-        </button>
+      <nav className="navbar">
+        <div className="navbar-logo">
+          <div className="navbar-logo-icon">⚡</div>
+          <span className="navbar-logo-text">Smart<span>Feed</span></span>
+        </div>
+        <div className="navbar-links">
+          <button
+            className={`nav-btn ${currentPage === 'dashboard' ? 'active' : ''}`}
+            onClick={() => setCurrentPage('dashboard')}
+          >
+            <span className="nav-btn-icon">📊</span> Dashboard
+          </button>
+          <button
+            className={`nav-btn ${currentPage === 'create' ? 'active' : ''}`}
+            onClick={() => setCurrentPage('create')}
+          >
+            <span className="nav-btn-icon">✏️</span> Content Creator
+          </button>
+          <button
+            className={`nav-btn ${currentPage === 'settings' ? 'active' : ''}`}
+            onClick={() => setCurrentPage('settings')}
+          >
+            <span className="nav-btn-icon">⚙️</span> Settings
+          </button>
+        </div>
       </nav>
 
-      {currentPage === 'dashboard' ? <Dashboard /> : <Create />}
+      {currentPage === 'dashboard' && <Dashboard />}
+      {currentPage === 'create' && <Create />}
+      {currentPage === 'settings' && <Settings />}
     </div>
   );
 }

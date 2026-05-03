@@ -14,6 +14,8 @@ export default defineConfig({
       '/headlines': 'http://localhost:8000',
       '/status': 'http://localhost:8000',
       '/generated': 'http://localhost:8000',
+      '/clips': 'http://localhost:8000',
+      '/video': 'http://localhost:8000',
     },
   },
 });

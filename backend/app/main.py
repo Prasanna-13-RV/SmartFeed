@@ -8,7 +8,6 @@ from fastapi.staticfiles import StaticFiles
 from app.config import settings
 from app.routes.posts import router as posts_router
 from app.routes.clips import clips_router, video_router
-from app.utils.db import start_mongo_retry_thread
 
 
 app = FastAPI(title=settings.app_name)
@@ -25,11 +24,6 @@ app.add_middleware(
 _generated_dir = Path(settings.output_dir)
 _generated_dir.mkdir(parents=True, exist_ok=True)
 app.mount("/generated", StaticFiles(directory=str(_generated_dir)), name="generated")
-
-
-@app.on_event("startup")
-def startup_event() -> None:
-    start_mongo_retry_thread()
 
 
 @app.get("/ping", tags=["health"])
@@ -63,6 +57,11 @@ def health() -> dict:
 @app.get("/", tags=["health"])
 def root() -> dict:
     return {"status": "ok", "service": settings.app_name}
+
+
+@app.get("/status", tags=["health"])
+def status() -> dict:
+    return {"status": "ok"}
 
 
 app.include_router(posts_router)

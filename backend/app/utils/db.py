@@ -16,7 +16,5 @@ def get_store() -> Dict[str, Dict[str, Any]]:
     return _store
 
 
-def start_mongo_retry_thread() -> None:
-    print("[db] Using pure in-memory store (ephemeral — live RSS mode).")
 
 
