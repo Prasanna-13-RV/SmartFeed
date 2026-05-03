@@ -9,11 +9,11 @@ import re
 from pathlib import Path
 from typing import List, Optional
 
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, HTTPException, UploadFile, File
 from fastapi.responses import FileResponse
 from pydantic import BaseModel, field_validator
 
-from app.services.clip_service import CLIPS_DIR, process_youtube_url
+from app.services.clip_service import CLIPS_DIR, process_youtube_url, save_cookies_from_b64, save_cookies_from_file
 import shutil
 
 # ── Input model ──────────────────────────────────────────────────────────────
@@ -44,6 +44,55 @@ class ClipRequest(BaseModel):
 
 clips_router = APIRouter(prefix="/clips", tags=["clips"])
 video_router = APIRouter(prefix="/video", tags=["clips"])
+
+
+class CookiesUpdateRequest(BaseModel):
+    cookies_b64: str  # base64-encoded Netscape cookies.txt
+
+
+# POST /clips/upload-cookies  — upload cookies.txt directly as a file
+@clips_router.post(
+    "/upload-cookies",
+    summary="Upload cookies.txt file directly",
+)
+async def upload_cookies(file: UploadFile = File(...)) -> dict:
+    """
+    Upload your cookies.txt directly — no base64 needed.
+
+    How to get cookies:
+    1. Install 'Get cookies.txt LOCALLY' Chrome extension
+    2. Visit youtube.com while logged in → click extension → Export
+    3. POST the file here
+    """
+    try:
+        contents = await file.read()
+        path = save_cookies_from_file(contents)
+        return {"updated": True, "cookies_file": path}
+    except Exception as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+
+
+# POST /clips/update-cookies  — base64 variant (kept for API/n8n use)
+@clips_router.post(
+    "/update-cookies",
+    summary="Update YouTube cookies without redeploying",
+)
+def update_cookies(request: CookiesUpdateRequest) -> dict:
+    """
+    Accepts a base64-encoded Netscape cookies.txt and saves it to disk.
+    Call this whenever YouTube bot-detection starts blocking downloads.
+
+    How to get cookies:
+    1. Install 'Get cookies.txt LOCALLY' Chrome extension
+    2. Visit youtube.com while logged in, click extension → Export
+    3. base64-encode the file:  base64 -w 0 cookies.txt
+    4. POST that value here
+    """
+    try:
+        path = save_cookies_from_b64(request.cookies_b64)
+        return {"updated": True, "cookies_file": path}
+    except Exception as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
 
 
 # POST /clips/process

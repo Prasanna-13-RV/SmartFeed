@@ -91,23 +91,91 @@ def _make_label_png(label: str, out_path: Path) -> None:
     img.save(str(out_path), "PNG")
 
 
-# Player clients that bypass YouTube bot-detection without cookies.
-# tv_embedded is an embedded TV client; ios uses the Apple app context.
+# Player clients that bypass YouTube bot-detection.
 _YT_CLIENTS = ["tv_embedded", "ios", "android"]
+
+# yt-dlp cache dir we fully control
+_YT_CACHE_DIR = Path(settings.output_dir) / ".yt_cache"
+_YT_CACHE_DIR.mkdir(parents=True, exist_ok=True)
+
+# Persistent cookies file — saved here by save_cookies_from_b64() or env var
+_COOKIES_FILE = Path(settings.output_dir) / "yt_cookies.txt"
+
+# In-memory cache for resolved cookies path
+_cookies_file_cache: str | None = None
+
+
+def save_cookies_from_b64(b64: str) -> str:
+    """
+    Decode a base64-encoded Netscape cookies.txt and persist it to disk.
+    Resets the in-memory cache so the new file is used on the next request.
+    Returns the path to the saved file.
+    """
+    import base64 as _b64
+    global _cookies_file_cache
+    data = _b64.b64decode(b64).decode("utf-8")
+    _COOKIES_FILE.parent.mkdir(parents=True, exist_ok=True)
+    _COOKIES_FILE.write_text(data, encoding="utf-8")
+    _cookies_file_cache = None   # force re-resolve
+    return str(_COOKIES_FILE)
+
+
+def save_cookies_from_file(contents: bytes) -> str:
+    """
+    Save raw cookies.txt bytes directly to disk.
+    Accepts the file upload bytes from the /upload-cookies endpoint.
+    """
+    global _cookies_file_cache
+    _COOKIES_FILE.parent.mkdir(parents=True, exist_ok=True)
+    _COOKIES_FILE.write_bytes(contents)
+    _cookies_file_cache = None   # force re-resolve
+    return str(_COOKIES_FILE)
+
+
+def _restore_cookies_from_env() -> None:
+    """On startup write YT_COOKIES_B64 to disk if no cookie file exists yet."""
+    if _COOKIES_FILE.exists():
+        return
+    b64 = settings.yt_cookies_b64
+    if b64:
+        try:
+            save_cookies_from_b64(b64)
+        except Exception:
+            pass
+
+
+_restore_cookies_from_env()
+
+
+def _resolve_cookies() -> str | None:
+    global _cookies_file_cache
+    if _cookies_file_cache is not None:
+        return _cookies_file_cache or None
+    if _COOKIES_FILE.exists():
+        _cookies_file_cache = str(_COOKIES_FILE)
+        return _cookies_file_cache
+    direct = settings.yt_cookies_file
+    if direct and Path(direct).exists():
+        _cookies_file_cache = direct
+        return _cookies_file_cache
+    _cookies_file_cache = ""
+    return None
 
 
 def _yt_base_opts() -> dict:
     """Common yt-dlp options applied to every request."""
     opts: dict = {
         "quiet": True,
+        "cachedir": str(_YT_CACHE_DIR),
         "extractor_args": {"youtube": {"player_client": _YT_CLIENTS}},
     }
-    cookies = settings.yt_cookies_file
-    if cookies and Path(cookies).exists():
+    cookies = _resolve_cookies()
+    if cookies:
         opts["cookiefile"] = cookies
     return opts
 
 
+def _validate_video_id(video_id: str) -> None:
     """Raise ValueError if video_id contains path-traversal characters."""
     if not _YT_ID_RE.match(video_id):
         raise ValueError(f"Unsafe video_id: {video_id!r}")

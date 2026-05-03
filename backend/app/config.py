@@ -12,6 +12,7 @@ class Settings(BaseModel):
     font_path: str = os.getenv("FONT_PATH", "../assets/fonts/Montserrat-Regular.ttf")
     ffmpeg_binary: str = os.getenv("FFMPEG_BINARY", "ffmpeg")
     yt_cookies_file: str = os.getenv("YT_COOKIES_FILE", "")
+    yt_cookies_b64: str = os.getenv("YT_COOKIES_B64", "")
 
 
 settings = Settings()
