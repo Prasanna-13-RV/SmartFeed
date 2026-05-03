@@ -91,7 +91,23 @@ def _make_label_png(label: str, out_path: Path) -> None:
     img.save(str(out_path), "PNG")
 
 
-def _validate_video_id(video_id: str) -> None:
+# Player clients that bypass YouTube bot-detection without cookies.
+# tv_embedded is an embedded TV client; ios uses the Apple app context.
+_YT_CLIENTS = ["tv_embedded", "ios", "android"]
+
+
+def _yt_base_opts() -> dict:
+    """Common yt-dlp options applied to every request."""
+    opts: dict = {
+        "quiet": True,
+        "extractor_args": {"youtube": {"player_client": _YT_CLIENTS}},
+    }
+    cookies = settings.yt_cookies_file
+    if cookies and Path(cookies).exists():
+        opts["cookiefile"] = cookies
+    return opts
+
+
     """Raise ValueError if video_id contains path-traversal characters."""
     if not _YT_ID_RE.match(video_id):
         raise ValueError(f"Unsafe video_id: {video_id!r}")
@@ -211,12 +227,7 @@ def process_youtube_url(url: str, clip_duration: int | None = None) -> dict:
     metadata and a sensible default is chosen automatically.
     """
     # ── 1. Extract metadata (no download yet) ──────────────────────────────
-    info_opts: dict = {
-        "quiet": True,
-        "skip_download": True,
-        # Use android client first — avoids the SSAP/nsig URL-missing problem
-        "extractor_args": {"youtube": {"player_client": ["android", "web"]}},
-    }
+    info_opts: dict = {**_yt_base_opts(), "skip_download": True}
     with yt_dlp.YoutubeDL(info_opts) as ydl:
         info = ydl.extract_info(url, download=False)
     video_id: str = info["id"]
@@ -236,14 +247,11 @@ def process_youtube_url(url: str, clip_duration: int | None = None) -> dict:
 
     # ── 2. Download ────────────────────────────────────────────────────────
     dl_opts: dict = {
-        # Most permissive selector: mp4 first, any container as last resort.
-        # android client sidesteps the SSAP experiment / nsig missing-URL bug.
+        **_yt_base_opts(),
         "format": "bestvideo[ext=mp4]+bestaudio[ext=m4a]/bestvideo+bestaudio/best[ext=mp4]/best",
         "merge_output_format": "mp4",
         "outtmpl": str(original_path),
         "ffmpeg_location": str(Path(_FFMPEG).parent),
-        "extractor_args": {"youtube": {"player_client": ["android", "web"]}},
-        "quiet": True,
     }
     with yt_dlp.YoutubeDL(dl_opts) as ydl:
         ydl.download([url])
