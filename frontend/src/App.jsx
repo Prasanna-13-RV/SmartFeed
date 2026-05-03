@@ -10,6 +10,7 @@ import {
 } from './api';
 import Create from './Create';
 import Settings from './Settings';
+import Clips from './Clips';
 
 function Dashboard() {
   const [posts, setPosts] = useState([]);
@@ -337,6 +338,12 @@ export default function App() {
             <span className="nav-btn-icon">✏️</span> Content Creator
           </button>
           <button
+            className={`nav-btn ${currentPage === 'clips' ? 'active' : ''}`}
+            onClick={() => setCurrentPage('clips')}
+          >
+            <span className="nav-btn-icon">🎬</span> YT Clips
+          </button>
+          <button
             className={`nav-btn ${currentPage === 'settings' ? 'active' : ''}`}
             onClick={() => setCurrentPage('settings')}
           >
@@ -347,6 +354,7 @@ export default function App() {
 
       {currentPage === 'dashboard' && <Dashboard />}
       {currentPage === 'create' && <Create />}
+      {currentPage === 'clips' && <Clips />}
       {currentPage === 'settings' && <Settings />}
     </div>
   );

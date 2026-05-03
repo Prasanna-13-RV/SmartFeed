@@ -53,3 +53,25 @@ export const uploadCookies = async (file) => {
   });
   return data;
 };
+
+export const getAllClips = async () => {
+  const { data } = await api.get('/clips');
+  return data; // { videos: [{video_id, total, links}], total_videos, total_clips }
+};
+
+export const processClips = async (urls, clipDuration = null) => {
+  const { data } = await api.post('/clips/process', { urls, clip_duration: clipDuration }, {
+    timeout: 600000, // 10 min — video processing can take a while
+  });
+  return data; // { video_id: [links...] }
+};
+
+export const getClips = async (videoId) => {
+  const { data } = await api.get(`/clips/${videoId}`);
+  return data;
+};
+
+export const deleteClips = async (videoId) => {
+  const { data } = await api.delete(`/clips/${videoId}`);
+  return data;
+};

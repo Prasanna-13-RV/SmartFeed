@@ -174,6 +174,57 @@ def serve_clip(video_id: str, clip_index: int) -> FileResponse:
     )
 
 
+# GET /clips  — list ALL videos and their clips
+@clips_router.get(
+    "",
+    summary="List all generated videos and their clips",
+)
+def list_all_clips() -> dict:
+    """Return every video folder and its clip links, grouped by video ID.
+
+    Example response::
+
+        {
+          "videos": [
+            {
+              "video_id": "dQw4w9WgXcQ",
+              "total": 3,
+              "links": [
+                "http://localhost:8000/video/dQw4w9WgXcQ/1",
+                "http://localhost:8000/video/dQw4w9WgXcQ/2",
+                "http://localhost:8000/video/dQw4w9WgXcQ/3"
+              ]
+            }
+          ],
+          "total_videos": 1,
+          "total_clips": 3
+        }
+    """
+    from app.config import settings as _s
+    base = _s.base_url.rstrip("/")
+
+    videos = []
+    if CLIPS_DIR.exists():
+        for video_dir in sorted(CLIPS_DIR.iterdir()):
+            if not video_dir.is_dir():
+                continue
+            clips = sorted(
+                video_dir.glob("clip_*.mp4"),
+                key=lambda p: int(p.stem.split("_")[1]),
+            )
+            if not clips:
+                continue
+            vid = video_dir.name
+            links = [f"{base}/video/{vid}/{i}" for i in range(1, len(clips) + 1)]
+            videos.append({"video_id": vid, "total": len(clips), "links": links})
+
+    return {
+        "videos": videos,
+        "total_videos": len(videos),
+        "total_clips": sum(v["total"] for v in videos),
+    }
+
+
 # GET /clips/{video_id}  — list existing clips for a video
 @clips_router.get(
     "/{video_id}",
