@@ -263,13 +263,13 @@ def generate_instagram_image(post: dict, template: int = 1) -> str:
 
 
 # ─────────────────────────────────────────────────
-#  YOUTUBE TEMPLATES  (1080 × 1080)
+#  YOUTUBE TEMPLATES  (1080 × 1920 — Shorts 9:16)
 # ─────────────────────────────────────────────────
 
 def _yt_photo(post: dict, out_path: Path) -> None:
-    """Video template — Full RSS image background with dark overlay, text on top"""
-    W, H = 1080, 1080
-    ACCENT = (255, 100, 40)  # orange — matches Instagram Dark Bold
+    """Video template — 9:16 Shorts format, full RSS image bg, text centred in lower half"""
+    W, H = 1080, 1920
+    ACCENT = (255, 100, 40)  # orange
 
     canvas = Image.new("RGB", (W, H), (20, 20, 30))
 
@@ -277,60 +277,62 @@ def _yt_photo(post: dict, out_path: Path) -> None:
     if rss_img:
         canvas.paste(rss_img, (0, 0))
 
-    # Uniform dark overlay across entire canvas — no gaps
-    canvas = _overlay(canvas, 0, 0, W, H, (0, 0, 0), 195)
-    # Extra darkening at top (brand area) and bottom
-    canvas = _overlay(canvas, 0, 0, W, 200, (0, 0, 0), 80)
-    canvas = _overlay(canvas, 0, H - 100, W, 100, (0, 0, 0), 80)
+    # Uniform dark overlay
+    canvas = _overlay(canvas, 0, 0, W, H, (0, 0, 0), 185)
+    # Extra darkening at top (brand area)
+    canvas = _overlay(canvas, 0, 0, W, 260, (0, 0, 0), 80)
+    # Heavier gradient in lower half where text lives
+    canvas = _overlay(canvas, 0, H // 2, W, H // 2, (0, 0, 0), 60)
+    canvas = _overlay(canvas, 0, H - 120, W, 120, (0, 0, 0), 80)
 
     draw = ImageDraw.Draw(canvas)
 
     # ── Brand top-left ──
-    brand_font = _load_font(52)
-    smart_bbox = draw.textbbox((56, 48), "SMART", font=brand_font)
-    draw.text((56, 48), "SMART", fill="white", font=brand_font)
-    draw.text((smart_bbox[2], 48), "FEED", fill=ACCENT, font=brand_font)
+    brand_font = _load_font(64)
+    smart_bbox = draw.textbbox((64, 60), "SMART", font=brand_font)
+    draw.text((64, 60), "SMART", fill="white", font=brand_font)
+    draw.text((smart_bbox[2], 60), "FEED", fill=ACCENT, font=brand_font)
 
     # ── Category pill below brand ──
-    cat_font = _load_font(32)
+    cat_font = _load_font(36)
     cat_text = f"#{post.get('category', 'news').upper()}"
     cb = draw.textbbox((0, 0), cat_text, font=cat_font)
-    cw, ch = cb[2] - cb[0] + 28, cb[3] - cb[1] + 20
-    draw.rounded_rectangle([(56, 132), (56 + cw, 132 + ch)], radius=12, fill=ACCENT)
-    draw.text((68, 138), cat_text, fill="white", font=cat_font)
+    cw, ch = cb[2] - cb[0] + 32, cb[3] - cb[1] + 22
+    draw.rounded_rectangle([(64, 162), (64 + cw, 162 + ch)], radius=14, fill=ACCENT)
+    draw.text((80, 169), cat_text, fill="white", font=cat_font)
 
-    # ── Measure content block height to vertically centre it ──
-    title_font = _load_font(62)
-    title_lines = _wrap_text(draw, post["title"], title_font, W - 100, max_lines=4)
-    title_line_h = 78
+    # ── Content block — vertically centred in the lower two-thirds ──
+    title_font = _load_font(72)
+    title_lines = _wrap_text(draw, post["title"], title_font, W - 120, max_lines=5)
+    title_line_h = 90
     title_block_h = len(title_lines) * title_line_h
 
     desc = (post.get("description") or "").strip()
-    desc_font = _load_font(32)
-    desc_line_h = 50
-    desc_lines = _wrap_text(draw, desc, desc_font, W - 120, max_lines=6) if desc else []
+    desc_font = _load_font(38)
+    desc_line_h = 58
+    desc_lines = _wrap_text(draw, desc, desc_font, W - 140, max_lines=6) if desc else []
     desc_block_h = len(desc_lines) * desc_line_h
 
-    divider_h = 30  # divider + spacing
+    divider_h = 36
     content_h = title_block_h + divider_h + desc_block_h
 
-    # Centre between bottom of category pill (≈185) and bottom of canvas (H - 80)
-    content_top = 185
-    content_bottom = H - 80
+    # Centre content in the middle zone (between category pill bottom and near bottom)
+    content_top = H // 2 - 80
+    content_bottom = H - 140
     available = content_bottom - content_top
-    y = content_top + (available - content_h) // 2
+    y = content_top + max(0, (available - content_h) // 2)
 
-    # ── Title (centred) ──
+    # ── Title ──
     for line in title_lines:
         _draw_centered(draw, line, y, title_font, (255, 255, 255), W)
         y += title_line_h
 
     # ── Divider ──
-    y += 14
-    draw.rectangle([(W // 2 - 90, y), (W // 2 + 90, y + 3)], fill=ACCENT)
-    y += 20
+    y += 16
+    draw.rectangle([(W // 2 - 100, y), (W // 2 + 100, y + 4)], fill=ACCENT)
+    y += 24
 
-    # ── Description (centred) ──
+    # ── Description ──
     for line in desc_lines:
         _draw_centered(draw, line, y, desc_font, (220, 225, 235), W)
         y += desc_line_h
@@ -386,7 +388,7 @@ def generate_youtube_short(post: dict, template: int = 1, audio_path: Optional[s
         import imageio  # type: ignore
         import numpy as np  # type: ignore
 
-        img = Image.open(yt_image_path).convert("RGB").resize((1080, 1080), Image.LANCZOS)
+        img = Image.open(yt_image_path).convert("RGB").resize((1080, 1920), Image.LANCZOS)
         frame = np.array(img)
         fps, dur = 30, 10
 

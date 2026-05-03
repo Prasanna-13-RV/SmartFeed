@@ -1,6 +1,7 @@
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
 from typing import List, Literal, Optional
+from pathlib import Path
 
 from app.services.post_service import (
     get_random_headlines,
@@ -12,6 +13,7 @@ from app.services.post_service import (
     retry_failed,
     upload_selected_posts,
 )
+from app.utils.db import get_store
 
 router = APIRouter()
 
@@ -119,7 +121,7 @@ class GenerateLatestRequest(BaseModel):
 
 
 @router.post(
-    "/generate-latest/",
+    "/generate-latest",
     summary="One-shot: fetch RSS → pick best headline → generate → upload",
     responses={
         400: {"description": "Invalid platform"},
@@ -143,3 +145,92 @@ def generate_latest_endpoint(payload: GenerateLatestRequest):
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     except RuntimeError as exc:
         raise HTTPException(status_code=500, detail=str(exc)) from exc
+
+
+@router.delete(
+    "/posts/{rss_id}",
+    summary="Delete a post and its generated media files",
+    responses={
+        404: {"description": "Post not found"},
+    },
+)
+def delete_post(rss_id: str):
+    store = get_store()
+    post = store.get(rss_id)
+    if not post:
+        raise HTTPException(status_code=404, detail=f"Post '{rss_id}' not found")
+
+    deleted_files = []
+    for key in ("media_path", "ig_path", "yt_path"):
+        path_str = post.get(key)
+        if path_str:
+            p = Path(path_str)
+            if p.exists():
+                p.unlink()
+                deleted_files.append(p.name)
+
+    del store[rss_id]
+    return {"deleted": rss_id, "files_removed": deleted_files}
+
+
+@router.delete(
+    "/files/{filename}",
+    summary="Delete a generated file by its filename (without extension)",
+)
+def delete_file(filename: str):
+    from app.config import settings as _settings
+    output_root = Path(_settings.output_dir)
+    search_dirs = [
+        output_root / "images",
+        output_root / "videos",
+    ]
+    deleted = []
+    for folder in search_dirs:
+        if not folder.exists():
+            continue
+        for f in folder.iterdir():
+            if f.stem == filename:
+                f.unlink()
+                deleted.append(str(f.name))
+
+    if not deleted:
+        raise HTTPException(status_code=404, detail=f"No file found with name '{filename}'")
+
+    return {"deleted": deleted}
+
+
+def _delete_folder_contents(folder: Path) -> list[str]:
+    deleted = []
+    if folder.exists():
+        for f in folder.iterdir():
+            if f.is_file():
+                f.unlink()
+                deleted.append(f.name)
+    return deleted
+
+
+@router.delete("/files/images", summary="Delete all generated images")
+def delete_all_images():
+    from app.config import settings as _settings
+    deleted = _delete_folder_contents(Path(_settings.output_dir) / "images")
+    return {"deleted_count": len(deleted), "deleted": deleted}
+
+
+@router.delete("/files/videos", summary="Delete all generated videos")
+def delete_all_videos():
+    from app.config import settings as _settings
+    deleted = _delete_folder_contents(Path(_settings.output_dir) / "videos")
+    return {"deleted_count": len(deleted), "deleted": deleted}
+
+
+@router.delete("/files", summary="Delete all generated images and videos")
+def delete_all_files():
+    from app.config import settings as _settings
+    output_root = Path(_settings.output_dir)
+    deleted_images = _delete_folder_contents(output_root / "images")
+    deleted_videos = _delete_folder_contents(output_root / "videos")
+    return {
+        "deleted_count": len(deleted_images) + len(deleted_videos),
+        "images": deleted_images,
+        "videos": deleted_videos,
+    }
