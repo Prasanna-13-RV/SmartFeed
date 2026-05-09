@@ -9,3 +9,4 @@ google-auth==2.29.0
 google-auth-oauthlib==1.2.0
 google-api-python-client==2.125.0
 yt-dlp>=2025.3.31
+cloudinary==1.41.0

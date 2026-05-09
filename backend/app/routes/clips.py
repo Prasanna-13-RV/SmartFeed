@@ -14,6 +14,7 @@ from fastapi.responses import FileResponse
 from pydantic import BaseModel, field_validator
 
 from app.services.clip_service import CLIPS_DIR, process_youtube_url, save_cookies_from_b64, save_cookies_from_file
+from app.services.clips_metadata_service import get_oldest_video_with_clips, get_all_clips_for_video
 import shutil
 
 # ── Input model ──────────────────────────────────────────────────────────────
@@ -222,6 +223,62 @@ def list_all_clips() -> dict:
         "videos": videos,
         "total_videos": len(videos),
         "total_clips": sum(v["total"] for v in videos),
+    }
+
+
+# GET /clips/oldest/video  — get oldest video with clips in ascending order
+@clips_router.get(
+    "/oldest/video",
+    summary="Get oldest video first clip",
+    responses={
+        200: {"description": "Oldest video with first clip only"},
+        404: {"description": "No clips found"},
+    },
+)
+def get_oldest_video() -> dict:
+    """
+    Fetch the oldest YouTube video (by first clip upload time) and return only
+    the first clip (clip 1).
+    
+    Returns the first video that was uploaded to Cloudinary with just its first clip.
+    
+    Example response::
+    
+        {
+          "video_id": "dQw4w9WgXcQ",
+          "clip_number": 1,
+          "title": "Video Title - Part 1/3",
+          "cloudinary_url": "https://res.cloudinary.com/...",
+          "duration": 60,
+          "uploaded_at": "2024-01-15T10:30:00"
+        }
+    """
+    result = get_oldest_video_with_clips()
+    
+    if result is None:
+        raise HTTPException(
+            status_code=404,
+            detail="No clips found. Process a YouTube video first.",
+        )
+    
+    video_id, clips = result
+    
+    # Return only the first clip
+    if not clips:
+        raise HTTPException(
+            status_code=404,
+            detail="No clips found for the oldest video.",
+        )
+    
+    first_clip = clips[0]
+    
+    return {
+        "video_id": video_id,
+        "clip_number": first_clip.clip_number,
+        "title": first_clip.title,
+        "cloudinary_url": first_clip.cloudinary_url,
+        "duration": first_clip.duration,
+        "uploaded_at": first_clip.uploaded_at.isoformat() if first_clip.uploaded_at else None,
     }
 
 

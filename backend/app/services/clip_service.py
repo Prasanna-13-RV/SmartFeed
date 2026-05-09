@@ -3,6 +3,7 @@
 Download YouTube videos via yt-dlp, split into short clips, and convert each
 clip to portrait/Shorts format (1080×1920) with a title label overlay.
 The original download and raw split files are removed after processing.
+Clips are uploaded to Cloudinary and deleted locally after successful upload.
 """
 from __future__ import annotations
 
@@ -16,6 +17,8 @@ import yt_dlp
 from PIL import Image, ImageDraw, ImageFont
 
 from app.config import settings
+from app.services.upload_service import upload_clip_to_cloudinary
+from app.services.clips_metadata_service import save_clip_metadata
 
 # All clips live under generated/videos/clips/<video_id>/
 CLIPS_DIR = Path(settings.output_dir) / "videos" / "clips"
@@ -330,19 +333,44 @@ def process_youtube_url(url: str, clip_duration: int | None = None) -> dict:
 
     # ── 4. Convert each raw clip to Shorts format ──────────────────────────
     final_clips: List[Path] = []
+    cloudinary_links: List[str] = []
+    
     for idx, raw in enumerate(raw_clips, start=1):
         label = f"Part {idx}/{total_clips}"
         dst = clip_dir / f"clip_{idx}.mp4"
         _to_shorts(raw, dst, label)
         raw.unlink(missing_ok=True)   # delete raw segment
         final_clips.append(dst)
+        
+        # Upload to Cloudinary
+        try:
+            cloudinary_url = upload_clip_to_cloudinary(str(dst), video_id, idx)
+            save_clip_metadata(
+                video_id=video_id,
+                clip_number=idx,
+                cloudinary_url=cloudinary_url,
+                title=f"{video_title} - Part {idx}/{total_clips}",
+                duration=clip_duration,
+            )
+            cloudinary_links.append(cloudinary_url)
+            # Delete local clip after successful upload
+            dst.unlink(missing_ok=True)
+        except Exception as e:
+            # If upload fails, keep the local clip and log the error
+            print(f"Warning: Failed to upload clip {idx} for video {video_id}: {str(e)}")
+            cloudinary_links.append(f"[LOCAL] {settings.base_url}/video/{video_id}/{idx}")
 
     # ── 5. Delete original download ────────────────────────────────────────
     original_path.unlink(missing_ok=True)
 
-    # ── 6. Build public links ──────────────────────────────────────────────
-    base = settings.base_url.rstrip("/")
-    links = [f"{base}/video/{video_id}/{i}" for i in range(1, total_clips + 1)]
+    # ── 6. Build public links (use Cloudinary if available) ─────────────────
+    # If all uploads succeeded, use cloudinary_links; otherwise fall back to local
+    if len(cloudinary_links) == total_clips and all(not url.startswith("[LOCAL]") for url in cloudinary_links):
+        links = cloudinary_links
+    else:
+        # Fall back to local links if Cloudinary uploads failed
+        base = settings.base_url.rstrip("/")
+        links = [f"{base}/video/{video_id}/{i}" for i in range(1, total_clips + 1)]
 
     return {
         "video_id": video_id,
